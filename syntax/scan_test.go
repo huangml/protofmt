@@ -17,18 +17,8 @@ type Token struct {
 
 var identRegexp = regexp.MustCompile(`[a-zA-Z0-9\.\-_\(\)]`)
 
-func isIdent(s string) bool {
-	return identRegexp.MatchString(s)
-}
-
-var text = `
-default=}100
-`
-
-func TestA(t *testing.T) {
-	toks := scan(bytes.NewReader([]byte(text)))
-	p := NewParser(toks)
-	fmt.Println(p.parseOption())
+func isIdent(t Token) bool {
+	return identRegexp.MatchString(t.Text)
 }
 
 func scan(r io.Reader) (toks []Token) {
@@ -36,7 +26,7 @@ func scan(r io.Reader) (toks []Token) {
 	s.Init(r)
 	s.Mode = scanner.ScanIdents | scanner.ScanStrings | scanner.ScanComments
 	s.Whitespace = scanner.GoWhitespace
-	s.IsIdentRune = func(c rune, i int) bool { return isIdent(string(c)) }
+	s.IsIdentRune = func(c rune, i int) bool { return isIdent(Token{Text: string(c)}) }
 
 	for {
 		if t := s.Scan(); t != scanner.EOF {
@@ -62,7 +52,7 @@ func NewParser(toks []Token) *Parser {
 	}
 }
 
-func (p *Parser) EOF() bool {
+func (p *Parser) eof() bool {
 	return p.index >= len(p.toks)
 }
 
@@ -70,9 +60,35 @@ func (p *Parser) peek() Token {
 	return p.toks[p.index]
 }
 
-func (p *Parser) next() Token {
-	defer func() { p.index++ }()
-	return p.toks[p.index]
+func (p *Parser) next() {
+	p.index++
+}
+
+type TokenFnMap map[int]func(t Token) bool
+
+func (p *Parser) parseTokens(when string, m TokenFnMap) (toks []Token, err error) {
+	for i := 0; ; i++ {
+		f, ok := m[i]
+		if !ok {
+			return
+		}
+
+		if p.eof() {
+			err = fmt.Errorf("unexpected EOF when %v", when)
+			return
+		}
+
+		t := p.peek()
+
+		ok = f(t)
+		if !ok {
+			err = fmt.Errorf("unexepcted token '%v' when %v [%v:%v]", t.Text, when, t.Line, t.Column)
+			return
+		}
+
+		toks = append(toks, t)
+		p.next()
+	}
 }
 
 // key=value
@@ -81,47 +97,47 @@ type Option struct {
 }
 
 func (p *Parser) parseOption() (opt *Option, err error) {
-	when := "parseOption"
-	checkEOF := func() bool {
-		if p.EOF() {
-			opt, err = nil, EOFError(when)
-			return false
-		}
-		return true
-	}
+	toks, err := p.parseTokens("parseOption", TokenFnMap{
+		0: isIdent,
+		1: func(t Token) bool { return t.Text == "=" },
+		2: isIdent,
+	})
 
-	var t [3]Token
-	for i := range t {
-		if !checkEOF() {
-			return
-		}
-		t[i] = p.next()
+	if err != nil {
+		return nil, err
+	} else {
+		return &Option{
+			Left:  toks[0],
+			Right: toks[2],
+		}, nil
 	}
+}
 
-	if !isIdent(t[0].Text) {
-		return nil, TokenError(when, t[0])
-	}
+// tok tok tok ... max to 5
+type Idents struct {
+	Token []Token
+}
 
-	if t[1].Text != "=" {
-		return nil, TokenError(when, t[1])
-	}
+func (p *Parser) parseIdents() (idents *Idents, err error) {
+	toks, _ := p.parseTokens("parseIdents", TokenFnMap{
+		0: isIdent,
+		1: isIdent,
+		2: isIdent,
+		3: isIdent,
+		4: isIdent,
+		5: isIdent,
+	})
 
-	if !isIdent(t[2].Text) {
-		return nil, TokenError(when, t[2])
-	}
-
-	return &Option{
-		Left:  t[0],
-		Right: t[2],
+	return &Idents{
+		Token: toks,
 	}, nil
 }
 
-func EOFError(when string) error {
-	return fmt.Errorf("unexpected EOF when %v", when)
-}
-
-func TokenError(when string, tok Token) error {
-	return fmt.Errorf("unexepcted token '%v' when %v [%v:%v]", tok.Text, when, tok.Line, tok.Column)
+func TestA(t *testing.T) {
+	toks := scan(bytes.NewReader([]byte("abc def ")))
+	fmt.Println(toks)
+	p := NewParser(toks)
+	fmt.Println(p.parseIdents())
 }
 
 // tok1 tok2
