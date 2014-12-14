@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strings"
 	"text/scanner"
 )
 
@@ -81,10 +82,6 @@ func (p *Parser) contextPath() string {
 	return s
 }
 
-func (p *Parser) checkTokenIf(f TokenCheckFn) bool {
-	return !p.eof() && f(p.peek())
-}
-
 func (p *Parser) COMPLAIN() {
 	if p.eof() {
 		panic(fmt.Sprintf("unexpected EOF when parse:[%v]", p.contextPath()))
@@ -95,19 +92,23 @@ func (p *Parser) COMPLAIN() {
 	}
 }
 
+func (p *Parser) checkTokenIf(f TokenCheckFn) bool {
+	return !p.eof() && f(p.peek())
+}
+
 func (p *Parser) mustParseToken(f TokenCheckFn) *Token {
 	if !p.checkTokenIf(f) {
 		p.COMPLAIN()
 	}
 
-	defer p.next()
-	return p.peek()
+	return p.next()
 }
 
 type TokenCheckFn func(t *Token) bool
 
 func checkIfIdentifer(t *Token) bool      { return isIdent(t.Text) }
 func checkIfEquals(s string) TokenCheckFn { return func(t *Token) bool { return t.Text == s } }
+func checkIfComment(t *Token) bool        { return strings.HasPrefix(t.Text, "//") }
 
 // Identifer can be either a keyword | string | number | variable
 type Identifer struct {
@@ -150,7 +151,8 @@ func (p *Parser) mustParseInstruction() *Instruction {
 //   1. Identifer
 //   2. Identifer [Option = OptionValue]
 type Value struct {
-	I, K, V *Identifer
+	I    *Identifer
+	K, V *Identifer
 }
 
 func (p *Parser) mustParseValue() *Value {
@@ -164,7 +166,6 @@ func (p *Parser) mustParseValue() *Value {
 	if !p.checkTokenIf(checkIfEquals("[")) { // form1
 		return v
 	}
-	p.next()
 
 	// form2
 	p.pushContext("option")
@@ -184,10 +185,12 @@ func (p *Parser) mustParseValue() *Value {
 //   1. Instruction;
 //   2. Instruction = Value;
 //   3. Instruction { Block }
+//   4. Comment
 type Statement struct {
 	I *Instruction
 	V *Value
 	B *Block
+	C *Token
 }
 
 func (p *Parser) mustParseStatement() *Statement {
@@ -195,6 +198,11 @@ func (p *Parser) mustParseStatement() *Statement {
 	defer p.popContext()
 
 	s := &Statement{}
+
+	if p.checkTokenIf(checkIfComment) { // form4
+		s.C = p.next()
+		return s
+	}
 
 	s.I = p.mustParseInstruction()
 
@@ -226,7 +234,7 @@ func (p *Parser) mustParseStatement() *Statement {
 	return nil
 }
 
-// Block is a list of Statements
+// Block is a list of Statements (number >= 0)
 type Block struct {
 	S []*Statement
 }
