@@ -85,18 +85,23 @@ func (p *Parser) checkTokenIf(f TokenCheckFn) bool {
 	return !p.eof() && f(p.peek())
 }
 
-func (p *Parser) parseTokenIf(f TokenCheckFn) (*Token, error) {
+func (p *Parser) COMPLAIN() {
 	if p.eof() {
-		return nil, fmt.Errorf("unexpected EOF when parse:[%v]", p.contextPath())
+		panic(fmt.Sprintf("unexpected EOF when parse:[%v]", p.contextPath()))
+	} else {
+		t := p.peek()
+		panic(fmt.Sprintf("unexpected token '%v' when parse:[%v], position:[%v:%v]",
+			t.Text, p.contextPath(), t.Line, t.Column))
+	}
+}
+
+func (p *Parser) mustParseToken(f TokenCheckFn) *Token {
+	if !p.checkTokenIf(f) {
+		p.COMPLAIN()
 	}
 
-	t := p.peek()
-	if !f(t) {
-		return nil, fmt.Errorf("unexpected token '%v' when parse:[%v], position:[%v:%v]", t.Text, p.contextPath(), t.Line, t.Column)
-	}
-
-	p.next()
-	return t, nil
+	defer p.next()
+	return p.peek()
 }
 
 type TokenCheckFn func(t *Token) bool
@@ -109,36 +114,35 @@ type Identifer struct {
 	T *Token
 }
 
-func (p *Parser) parseIdentifer() (*Identifer, error) {
+func (p *Parser) mustParseIdentifer() *Identifer {
 	p.pushContext("identifer")
 	defer p.popContext()
 
-	if tok, err := p.parseTokenIf(checkIfIdentifer); err != nil {
-		return nil, err
-	} else {
-		return &Identifer{tok}, nil
-	}
+	return &Identifer{p.mustParseToken(checkIfIdentifer)}
 }
 
-// Instruction is a list of Identifers
+// Instruction is a list of Identifers (number > 0)
 type Instruction struct {
 	I []*Identifer
 }
 
-func (p *Parser) parseInstruction() (*Instruction, error) {
+func (p *Parser) mustParseInstruction() *Instruction {
 	p.pushContext("instruction")
 	defer p.popContext()
 
-	var ins Instruction
+	ins := &Instruction{}
 
 	for {
-		if I, err := p.parseIdentifer(); err == nil {
-			ins.I = append(ins.I, I)
-		} else if len(ins.I) > 0 {
-			return &ins, nil
-		} else {
-			return nil, err
+		if p.checkTokenIf(checkIfIdentifer) {
+			ins.I = append(ins.I, p.mustParseIdentifer())
+			continue
 		}
+
+		if len(ins.I) > 0 {
+			return ins
+		}
+
+		p.COMPLAIN()
 	}
 }
 
@@ -149,17 +153,16 @@ type Value struct {
 	I, K, V *Identifer
 }
 
-func (p *Parser) parseValue() (*Value, error) {
+func (p *Parser) mustParseValue() *Value {
 	p.pushContext("value")
 	defer p.popContext()
 
-	I, err := p.parseIdentifer()
-	if err != nil {
-		return nil, err
-	}
+	v := &Value{}
+
+	v.I = p.mustParseIdentifer()
 
 	if !p.checkTokenIf(checkIfEquals("[")) { // form1
-		return &Value{I: I}, nil
+		return v
 	}
 	p.next()
 
@@ -167,25 +170,14 @@ func (p *Parser) parseValue() (*Value, error) {
 	p.pushContext("option")
 	defer p.popContext()
 
-	K, err := p.parseIdentifer()
-	if err != nil {
-		return nil, err
-	}
+	p.mustParseToken(checkIfEquals("["))
+	defer p.mustParseToken(checkIfEquals("]"))
 
-	if _, err := p.parseTokenIf(checkIfEquals("=")); err != nil {
-		return nil, err
-	}
+	v.K = p.mustParseIdentifer()
+	p.mustParseToken(checkIfEquals("="))
+	v.V = p.mustParseIdentifer()
 
-	V, err := p.parseIdentifer()
-	if err != nil {
-		return nil, err
-	}
-
-	if _, err := p.parseTokenIf(checkIfEquals("]")); err != nil {
-		return nil, err
-	}
-
-	return &Value{I: I, K: K, V: V}, nil
+	return v
 }
 
 // Statement has 3 forms:
@@ -198,54 +190,40 @@ type Statement struct {
 	B *Block
 }
 
-func (p *Parser) parseStatement() (*Statement, error) {
+func (p *Parser) mustParseStatement() *Statement {
 	p.pushContext("statement")
 	defer p.popContext()
 
-	I, err := p.parseInstruction()
-	if err != nil {
-		return nil, err
-	}
+	s := &Statement{}
+
+	s.I = p.mustParseInstruction()
 
 	if p.checkTokenIf(checkIfEquals(";")) { // form1
 		p.next()
 
-		return &Statement{I: I}, nil
+		return s
 	}
 
 	if p.checkTokenIf(checkIfEquals("=")) { // form2
 		p.next()
 
-		V, err := p.parseValue()
-		if err != nil {
-			return nil, err
-		}
+		s.V = p.mustParseValue()
+		p.mustParseToken(checkIfEquals(";"))
 
-		if _, err = p.parseTokenIf(checkIfEquals(";")); err != nil {
-			return nil, err
-		}
-
-		return &Statement{I: I, V: V}, nil
+		return s
 	}
 
 	if p.checkTokenIf(checkIfEquals("{")) { // form3
 		p.next()
 
-		B, err := p.parseBlock()
-		if err != nil {
-			return nil, err
-		}
+		s.B = p.mustParseBlock()
+		p.mustParseToken(checkIfEquals("}"))
 
-		if _, err = p.parseTokenIf(checkIfEquals("}")); err != nil {
-			return nil, err
-		}
-
-		return &Statement{I: I, B: B}, nil
+		return s
 	}
 
-	// always get an error, since we already checked form1
-	_, err = p.parseTokenIf(checkIfEquals(";"))
-	return nil, err
+	p.COMPLAIN()
+	return nil
 }
 
 // Block is a list of Statements
@@ -253,22 +231,18 @@ type Block struct {
 	S []*Statement
 }
 
-func (p *Parser) parseBlock() (*Block, error) {
+func (p *Parser) mustParseBlock() *Block {
 	p.pushContext("block")
 	defer p.popContext()
 
-	var b Block
+	b := &Block{}
 	for {
 		if p.eof() || p.checkTokenIf(checkIfEquals("}")) {
 			break
 		}
 
-		if S, err := p.parseStatement(); err != nil {
-			return nil, err
-		} else {
-			b.S = append(b.S, S)
-		}
+		b.S = append(b.S, p.mustParseStatement())
 	}
 
-	return &b, nil
+	return b
 }

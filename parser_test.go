@@ -21,19 +21,19 @@ func TestA(t *testing.T) {
 	// }
 	//      `
 
-	text = `
-        message world {
-        }
-        `
+	text = "message world {a{}}"
 
 	var p Parser
 	p.scan(bytes.NewReader([]byte(text)))
 
-	i, err := p.parseStatement()
-	if err == nil {
-		b, _ := json.MarshalIndent(i, "", "  ")
-		fmt.Println(string(b))
-	} else {
-		fmt.Println("error: ", err)
-	}
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Println("ERROR: ", err)
+		}
+	}()
+
+	s := p.mustParseStatement()
+
+	b, _ := json.MarshalIndent(s, "", "  ")
+	fmt.Println(string(b))
 }
