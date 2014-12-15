@@ -2,40 +2,11 @@ package main
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"testing"
 )
 
 func TestA(t *testing.T) {
-
-	text := `
-	message hello {
-	     message world {
-	             optional int32 i = 1[default=100];
-	     }
-
-	     repeated world w = 1;
-	     optional int32 i = 2;
-	}
-	     `
-
-	var p Parser
-	p.scan(bytes.NewReader([]byte(text)))
-
-	defer func() {
-		if err := recover(); err != nil {
-			fmt.Println("ERROR: ", err)
-		}
-	}()
-
-	s := p.mustParseStatement()
-
-	b, _ := json.MarshalIndent(s, "", "  ")
-	fmt.Println(string(b))
-}
-
-func TestB(t *testing.T) {
 	text := `
 	message hello {
 	     message world {
@@ -48,15 +19,11 @@ func TestB(t *testing.T) {
 	`
 
 	var p Parser
-	p.scan(bytes.NewReader([]byte(text)))
-
-	defer func() {
-		if err := recover(); err != nil {
-			fmt.Println("ERROR: ", err)
-		}
-	}()
-
-	b := p.mustParseBlock()
+	b, err := p.Parse(bytes.NewReader([]byte(text)))
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
 	var f Formatter
 	f.writeBlock(b)

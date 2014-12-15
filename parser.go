@@ -27,8 +27,7 @@ type Parser struct {
 	context []string
 }
 
-func (p *Parser) scan(r io.Reader) {
-
+func (p *Parser) Parse(r io.Reader) (b *Block, err error) {
 	var s scanner.Scanner
 
 	s.Init(r)
@@ -47,6 +46,14 @@ func (p *Parser) scan(r io.Reader) {
 			break
 		}
 	}
+
+	defer func() {
+		if msg := recover(); msg != nil {
+			err = fmt.Errorf("parse failed: %v", msg)
+		}
+	}()
+
+	return p.mustParseBlock(), nil
 }
 
 func (p *Parser) eof() bool {
